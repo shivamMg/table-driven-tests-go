@@ -1,4 +1,4 @@
-## table-driver-tests-go
+## table-driven-tests-go
 
 ### Test
 
