@@ -19,7 +19,7 @@ func NewController(auth Authenticator, db Database) *Controller {
 
 func (c *Controller) CreateTODO(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "", http.StatusMethodNotAllowed)
+		http.Error(w, "method is not POST", http.StatusMethodNotAllowed)
 		return
 	}
 
