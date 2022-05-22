@@ -24,6 +24,14 @@ func assertEqual(t *testing.T, expected any, actual any) {
 	t.Fatalf("%v (expected) != %v (actual)", expected, actual)
 }
 
+func responseBody(resp *http.Response) string {
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		panic("cannot read response body: " + err.Error())
+	}
+	return string(respBody)
+}
+
 func TestController_CreateTODO_MethodNotAllowed(t *testing.T) {
 	c := gomock.NewController(t)
 	defer c.Finish()
@@ -35,12 +43,10 @@ func TestController_CreateTODO_MethodNotAllowed(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "http://example.com/todos", nil)
 
 	ctrl.CreateTODO(w, r)
-
 	resp := w.Result()
-	respBody, _ := io.ReadAll(resp.Body)
 
 	assertEqual(t, 405, resp.StatusCode)
-	assertEqual(t, "method is not POST\n", string(respBody))
+	assertEqual(t, "method is not POST\n", responseBody(resp))
 }
 
 func TestController_CreateTODO_UnauthenticatedError(t *testing.T) {
@@ -58,12 +64,10 @@ func TestController_CreateTODO_UnauthenticatedError(t *testing.T) {
 	auth.EXPECT().IsAuthenticated(testToken).Return(false)
 
 	ctrl.CreateTODO(w, r)
-
 	resp := w.Result()
-	respBody, _ := io.ReadAll(resp.Body)
 
 	assertEqual(t, 401, resp.StatusCode)
-	assertEqual(t, "unauthenticated\n", string(respBody))
+	assertEqual(t, "unauthenticated\n", responseBody(resp))
 }
 
 func TestController_CreateTODO_BadRequestErrors(t *testing.T) {
@@ -92,12 +96,10 @@ func TestController_CreateTODO_BadRequestErrors(t *testing.T) {
 			auth.EXPECT().IsAuthenticated(testToken).Return(true)
 
 			ctrl.CreateTODO(w, r)
-
 			resp := w.Result()
-			respBody, _ := io.ReadAll(resp.Body)
 
 			assertEqual(t, 400, resp.StatusCode)
-			assertEqual(t, tc.expectedResponse, string(respBody))
+			assertEqual(t, tc.expectedResponse, responseBody(resp))
 		})
 	}
 }
@@ -114,29 +116,29 @@ func TestController_CreateTODO_DBError(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "http://example.com/todos", rBody)
 	r.Header.Add("AuthToken", testToken)
 
-	auth.EXPECT().IsAuthenticated(testToken).Return(true)
-	db.EXPECT().CreateTODO(&api.TODO{"task1", "cat1"}).Return(errors.New("failed to commit txn"))
+	gomock.InOrder(
+		auth.EXPECT().IsAuthenticated(testToken).Return(true),
+		db.EXPECT().CreateTODO(&api.TODO{"task1", "cat1"}).Return(errors.New("failed to commit txn")),
+	)
 
 	ctrl.CreateTODO(w, r)
-
 	resp := w.Result()
-	respBody, _ := io.ReadAll(resp.Body)
 
 	assertEqual(t, 500, resp.StatusCode)
-	assertEqual(t, "db error: failed to commit txn\n", string(respBody))
+	assertEqual(t, "db error: failed to commit txn\n", responseBody(resp))
 }
 
 func TestController_CreateTODO_BadTableDrivenTest(t *testing.T) {
 	testCases := []struct {
 		name string
 
-		method string
+		requestMethod string
 
-		expectAuthCall  bool
-		isAuthenticated bool
+		expectAuthCall bool
+		authCallReturn bool
 
 		expectDBCall bool
-		dbError      error
+		dbCallReturn error
 
 		expectedStatusCode int
 		expectedResponse   string
@@ -156,47 +158,50 @@ func TestController_CreateTODO_BadTableDrivenTest(t *testing.T) {
 
 			w := httptest.NewRecorder()
 			rBody := bytes.NewBufferString(`{"name": "task1", "category": "cat1"}`)
-			r := httptest.NewRequest(tc.method, "http://example.com/todos", rBody)
+			r := httptest.NewRequest(tc.requestMethod, "http://example.com/todos", rBody)
 			r.Header.Add("AuthToken", testToken)
 
 			if tc.expectAuthCall {
-				auth.EXPECT().IsAuthenticated(testToken).Return(tc.isAuthenticated)
+				auth.EXPECT().IsAuthenticated(testToken).Return(tc.authCallReturn)
 			}
 			if tc.expectDBCall {
-				db.EXPECT().CreateTODO(&api.TODO{"task1", "cat1"}).Return(tc.dbError)
+				db.EXPECT().CreateTODO(&api.TODO{"task1", "cat1"}).Return(tc.dbCallReturn)
 			}
 
 			ctrl.CreateTODO(w, r)
-
 			resp := w.Result()
-			respBody, _ := io.ReadAll(resp.Body)
 
 			assertEqual(t, tc.expectedStatusCode, resp.StatusCode)
-			assertEqual(t, tc.expectedResponse, string(respBody))
+			assertEqual(t, tc.expectedResponse, responseBody(resp))
 		})
 	}
 }
 
 func TestController_CreateTODO_Success(t *testing.T) {
+	// Setup mocks
 	c := gomock.NewController(t)
 	defer c.Finish()
 	auth := mock.NewMockAuthenticator(c)
 	db := mock.NewMockDatabase(c)
 	ctrl := api.NewController(auth, db)
 
+	// Setup response recorder and request
 	w := httptest.NewRecorder()
 	rBody := bytes.NewBufferString(`{"name": "task1", "category": "cat1"}`)
 	r := httptest.NewRequest(http.MethodPost, "http://example.com/todos", rBody)
 	r.Header.Add("AuthToken", testToken)
 
-	auth.EXPECT().IsAuthenticated(testToken).Return(true)
-	db.EXPECT().CreateTODO(&api.TODO{"task1", "cat1"}).Return(nil)
+	// Mock expectations
+	gomock.InOrder(
+		auth.EXPECT().IsAuthenticated(testToken).Return(true),
+		db.EXPECT().CreateTODO(&api.TODO{"task1", "cat1"}).Return(nil),
+	)
 
+	// Call HTTP handler
 	ctrl.CreateTODO(w, r)
-
 	resp := w.Result()
-	respBody, _ := io.ReadAll(resp.Body)
 
+	// Assertions
 	assertEqual(t, 201, resp.StatusCode)
-	assertEqual(t, "todo created", string(respBody))
+	assertEqual(t, "todo created", responseBody(resp))
 }

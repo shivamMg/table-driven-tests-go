@@ -18,12 +18,13 @@ func NewController(auth Authenticator, db Database) *Controller {
 }
 
 func (c *Controller) CreateTODO(w http.ResponseWriter, r *http.Request) {
+	// Is method allowed
 	if r.Method != http.MethodPost {
 		http.Error(w, "method is not POST", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Authentication
+	// Authentication call
 	token := r.Header.Get("AuthToken")
 	if !c.auth.IsAuthenticated(token) {
 		http.Error(w, "unauthenticated", http.StatusUnauthorized)
